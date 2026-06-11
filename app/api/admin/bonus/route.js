@@ -6,13 +6,17 @@
 //
 // GET  : retourne la liste des participants + des defis (pour les menus
 //        deroulants de l'interface admin).
-// POST : enregistre (ou met a jour) un bonus pour un joueur + un defi.
+// POST : enregistre TOUJOURS une NOUVELLE ligne de bonus pour un joueur +
+//        un defi. Aucune ligne existante n'est jamais mise a jour ou
+//        remplacee : un meme joueur peut recevoir plusieurs bonus pour le
+//        meme defi (ex. participations multiples), et le classement
+//        additionne toutes les lignes de Defis_Linguistiques pour cet
+//        ID_Joueur.
 
 import { NextResponse } from 'next/server';
 import {
   readSheetAsObjects,
   appendRow,
-  updateCells,
   generateId,
 } from '../../../../lib/sheets';
 import { TABS, DEFIS_LINGUISTIQUES_COLS } from '../../../../lib/schema';
@@ -45,12 +49,15 @@ export async function GET(request) {
         langue: d.Langue,
         pointsMax: Number(d.Points_Max || MAX_POINTS_PAR_DEFI),
       })),
-      bonusExistants: bonus.map((b) => ({
-        idJoueur: b.ID_Joueur,
-        nomDefi: b.Nom_Defi,
-        points: Number(b.Points || 0),
-        commentaire: b.Commentaire || '',
-      })),
+      bonusExistants: bonus
+        .filter((b) => b.ID_Joueur && String(b.ID_Joueur).trim() !== '')
+        .map((b) => ({
+          idJoueur: b.ID_Joueur,
+          nomDefi: b.Nom_Defi,
+          points: Number(b.Points || 0),
+          commentaire: b.Commentaire || '',
+          dateAttribution: b.Date_Attribution || '',
+        })),
     });
   } catch (err) {
     console.error('Erreur GET /api/admin/bonus', err);
@@ -83,48 +90,38 @@ export async function POST(request) {
     if (isNaN(pointsFinal) || pointsFinal < 0) pointsFinal = 0;
     if (pointsFinal > MAX_POINTS_PAR_DEFI) pointsFinal = MAX_POINTS_PAR_DEFI;
 
-    const { headers, items } = await readSheetAsObjects(
-      TABS.DEFIS_LINGUISTIQUES
-    );
-
-    const existing = items.find(
-      (b) => b.ID_Joueur === idJoueur && b.Nom_Defi === nomDefi
-    );
+    const { items } = await readSheetAsObjects(TABS.DEFIS_LINGUISTIQUES);
 
     const dateAttribution = new Date().toISOString();
 
-    if (existing) {
-      await updateCells(TABS.DEFIS_LINGUISTIQUES, existing._row, headers, {
-        Points: pointsFinal,
-        Date_Attribution: dateAttribution,
-        Commentaire: commentaire || '',
-      });
-    } else {
-      const idBonus = generateId('BO', items.length, 4);
-      const row = DEFIS_LINGUISTIQUES_COLS.map((col) => {
-        switch (col) {
-          case 'ID_Bonus':
-            return idBonus;
-          case 'ID_Joueur':
-            return idJoueur;
-          case 'Prenom_Pseudo':
-            return prenom || '';
-          case 'Nom_Defi':
-            return nomDefi;
-          case 'Langue':
-            return langue || '';
-          case 'Points':
-            return pointsFinal;
-          case 'Date_Attribution':
-            return dateAttribution;
-          case 'Commentaire':
-            return commentaire || '';
-          default:
-            return '';
-        }
-      });
-      await appendRow(TABS.DEFIS_LINGUISTIQUES, row);
-    }
+    // Toujours ajouter une nouvelle ligne, jamais mettre a jour ou
+    // remplacer une ligne existante. Cela permet d'attribuer plusieurs
+    // bonus au meme joueur pour le meme defi (ex. participations
+    // multiples) ; le classement additionnera toutes les lignes.
+    const idBonus = generateId('BO', items.length, 4);
+    const row = DEFIS_LINGUISTIQUES_COLS.map((col) => {
+      switch (col) {
+        case 'ID_Bonus':
+          return idBonus;
+        case 'ID_Joueur':
+          return idJoueur;
+        case 'Prenom_Pseudo':
+          return prenom || '';
+        case 'Nom_Defi':
+          return nomDefi;
+        case 'Langue':
+          return langue || '';
+        case 'Points':
+          return pointsFinal;
+        case 'Date_Attribution':
+          return dateAttribution;
+        case 'Commentaire':
+          return commentaire || '';
+        default:
+          return '';
+      }
+    });
+    await appendRow(TABS.DEFIS_LINGUISTIQUES, row);
 
     return NextResponse.json({ success: true, pointsAttribues: pointsFinal });
   } catch (err) {
