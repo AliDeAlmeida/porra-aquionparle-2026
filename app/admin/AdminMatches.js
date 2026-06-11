@@ -90,6 +90,10 @@ export default function AdminMatches({ password }) {
 
       {loading ? (
         <p className="text-craie/60 text-sm">Chargement...</p>
+      ) : matches.length === 0 ? (
+        <p className="text-craie/60 text-sm bg-marine border border-white/10 rounded-xl p-4">
+          Aucun match disponible. Remplissez l&apos;onglet Calendrier_Matchs pour saisir les resultats.
+        </p>
       ) : (
         <div className="space-y-3">
           {matches.map((m) => {

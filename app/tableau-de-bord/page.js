@@ -73,7 +73,7 @@ export default function TableauDeBordPage() {
   const upcomingMatches = matches
     .filter((m) => m.statut === 'A venir')
     .slice(0, 3);
-  const activeChallenge = challenges.find((c) => c.statut === 'Actif');
+  const activeChallenge = challenges.find((c) => c.statut === 'En cours');
 
   const showInitialModal =
     initialStatus &&

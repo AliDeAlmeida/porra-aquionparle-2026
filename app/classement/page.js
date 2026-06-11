@@ -70,6 +70,12 @@ export default function ClassementPage() {
         </div>
       ) : (
         <>
+          {ranking.every((r) => r.total === 0) && (
+            <p className="text-center text-craie/60 text-sm mb-6">
+              Le classement s&apos;animera des le premier resultat de match.
+            </p>
+          )}
+
           {/* Podium */}
           <div className="flex items-end justify-center gap-4 mb-10">
             {podium[1] && <PodiumStep player={podium[1]} place={2} height="h-24" medal="🥈" />}

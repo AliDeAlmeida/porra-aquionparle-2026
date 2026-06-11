@@ -34,7 +34,7 @@ export default function DefisPage() {
     );
   }
 
-  const actifs = challenges.filter((c) => c.statut === 'Actif');
+  const actifs = challenges.filter((c) => c.statut === 'En cours');
   const aVenir = challenges.filter((c) => c.statut === 'A venir');
   const termines = challenges.filter((c) => c.statut === 'Termine');
 

@@ -42,7 +42,7 @@ export async function GET(request) {
         pointsMax: Number(d.Points_Max || 20),
         dateDebut: d.Date_Debut,
         dateFin: d.Date_Fin,
-        statut: d.Statut,
+        statut: (d.Statut || '').trim(),
         monBonus,
       };
     });

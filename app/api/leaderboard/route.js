@@ -26,7 +26,10 @@ export async function GET() {
     ]);
 
     const ranking = participants
-      .filter((p) => (p.Statut || '').trim().toLowerCase() === 'actif')
+      .filter((p) => {
+        const statut = (p.Statut || '').trim().toLowerCase();
+        return statut === '' || statut === 'actif';
+      })
       .map((p) => {
         const idJoueur = p.ID_Joueur;
 
