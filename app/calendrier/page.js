@@ -8,6 +8,7 @@ import PrognosticModal from '../../components/PrognosticModal';
 const PHASES = [
   'Tous',
   'Phase de groupes',
+  'Seiziemes',
   'Huitiemes',
   'Quarts',
   'Demi-finales',
