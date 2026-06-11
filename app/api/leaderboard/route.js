@@ -11,6 +11,29 @@ import { NextResponse } from 'next/server';
 import { readSheetAsObjects } from '../../../lib/sheets';
 import { TABS } from '../../../lib/schema';
 
+// Convertit une valeur de cellule (qui peut etre un nombre, une chaine,
+// une chaine avec espaces, une virgule decimale, ou vide/undefined) en
+// nombre. Retourne 0 si la valeur est vide, manquante, ou non numerique.
+function toNumber(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  const str = String(value).trim();
+  if (str === '') return 0;
+  // Remplace une eventuelle virgule decimale par un point.
+  const normalized = str.replace(',', '.');
+  const num = Number(normalized);
+  return Number.isFinite(num) ? num : 0;
+}
+
+// Normalise un identifiant joueur pour la comparaison (trim + insensible
+// a la casse), afin d'eviter les ecarts dus a des espaces ou majuscules
+// accidentels dans le Sheet.
+function normId(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
 export async function GET() {
   try {
     const [
@@ -32,27 +55,29 @@ export async function GET() {
       })
       .map((p) => {
         const idJoueur = p.ID_Joueur;
+        const idNorm = normId(idJoueur);
 
         const pointsMatchs = pronosticsMatchs
-          .filter((pr) => pr.ID_Joueur === idJoueur)
-          .reduce((sum, pr) => {
-            const pts = pr.Points_Obtenus;
-            return sum + (pts !== '' && pts !== undefined ? Number(pts) : 0);
-          }, 0);
+          .filter((pr) => {
+            // Ignore les lignes vides (sans ID_Joueur ni ID_Pronostic).
+            if (!pr.ID_Joueur && !pr.ID_Pronostic) return false;
+            return normId(pr.ID_Joueur) === idNorm;
+          })
+          .reduce((sum, pr) => sum + toNumber(pr.Points_Obtenus), 0);
 
         const initial = pronosticsInitiaux.find(
-          (pi) => pi.ID_Joueur === idJoueur
+          (pi) => normId(pi.ID_Joueur) === idNorm
         );
         const pointsInitiaux = initial
-          ? Number(initial.Total_Initiaux || 0)
+          ? toNumber(initial.Total_Initiaux)
           : 0;
 
         const pointsDefis = defis
-          .filter((d) => d.ID_Joueur === idJoueur)
-          .reduce((sum, d) => {
-            const pts = d.Points;
-            return sum + (pts !== '' && pts !== undefined ? Number(pts) : 0);
-          }, 0);
+          .filter((d) => {
+            if (!d.ID_Joueur && !d.ID_Bonus) return false;
+            return normId(d.ID_Joueur) === idNorm;
+          })
+          .reduce((sum, d) => sum + toNumber(d.Points), 0);
 
         const total = pointsMatchs + pointsInitiaux + pointsDefis;
 
