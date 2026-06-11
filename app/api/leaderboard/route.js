@@ -1,128 +1,133 @@
-// app/api/leaderboard/route.js
+// app/api/admin/bonus/route.js
 //
-// Calcule le classement general en temps reel :
-// Total = Points matchs + Points pronostics initiaux + Points defis linguistiques
+// Permet aux organisatrices d'attribuer manuellement les points bonus
+// des defis linguistiques (regle 8 : maximum 20 points par defi,
+// attribues librement par les organisatrices).
 //
-// Ce calcul est fait ici, en JavaScript, a partir des donnees brutes des
-// onglets Pronostics_Matchs, Pronostics_Initiaux et Defis_Linguistiques.
-// Aucune formule Google Sheets requise.
+// GET  : retourne la liste des participants + des defis (pour les menus
+//        deroulants de l'interface admin).
+// POST : enregistre TOUJOURS une NOUVELLE ligne de bonus pour un joueur +
+//        un defi. Aucune ligne existante n'est jamais mise a jour ou
+//        remplacee : un meme joueur peut recevoir plusieurs bonus pour le
+//        meme defi (ex. participations multiples), et le classement
+//        additionne toutes les lignes de Defis_Linguistiques pour cet
+//        ID_Joueur.
 
 import { NextResponse } from 'next/server';
-import { readSheetAsObjects } from '../../../lib/sheets';
-import { TABS } from '../../../lib/schema';
+import {
+  readSheetAsObjects,
+  appendRow,
+  generateId,
+} from '../../../../lib/sheets';
+import { TABS, DEFIS_LINGUISTIQUES_COLS } from '../../../../lib/schema';
+import { verifyAdminPassword } from '../../../../lib/adminAuth';
 
-// Convertit une valeur de cellule (qui peut etre un nombre, une chaine,
-// une chaine avec espaces, un signe "+" devant, une virgule decimale, ou
-// vide/undefined) en nombre. Retourne 0 si la valeur est vide, manquante,
-// ou non numerique.
-function toNumber(value) {
-  if (value === null || value === undefined) return 0;
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : 0;
-  }
-  let str = String(value).trim();
-  if (str === '') return 0;
-  // Retire un eventuel "+" devant (ex: "+10").
-  if (str.startsWith('+')) str = str.slice(1).trim();
-  // Remplace une eventuelle virgule decimale par un point.
-  str = str.replace(',', '.');
-  const num = Number(str);
-  return Number.isFinite(num) ? num : 0;
-}
+const MAX_POINTS_PAR_DEFI = 20;
 
-// Normalise un identifiant joueur pour la comparaison (trim + insensible
-// a la casse), afin d'eviter les ecarts dus a des espaces ou majuscules
-// accidentels dans le Sheet.
-function normId(value) {
-  return String(value || '').trim().toUpperCase();
-}
-
-export async function GET() {
+export async function GET(request) {
   try {
-    const [
-      { items: participants },
-      { items: pronosticsMatchs },
-      { items: pronosticsInitiaux },
-      { items: defis },
-    ] = await Promise.all([
-      readSheetAsObjects(TABS.PARTICIPANTS),
-      readSheetAsObjects(TABS.PRONOSTICS_MATCHS),
-      readSheetAsObjects(TABS.PRONOSTICS_INITIAUX),
-      readSheetAsObjects(TABS.DEFIS_LINGUISTIQUES),
-    ]);
+    const password = request.headers.get('x-admin-password') || '';
+    const ok = await verifyAdminPassword(password);
+    if (!ok) {
+      return NextResponse.json({ error: 'Non autorise.' }, { status: 401 });
+    }
 
-    const ranking = participants
-      .filter((p) => {
-        const statut = (p.Statut || '').trim().toLowerCase();
-        return statut === '' || statut === 'actif';
-      })
-      .map((p) => {
-        const idJoueur = p.ID_Joueur;
-        const idNorm = normId(idJoueur);
+    const [{ items: participants }, { items: defisActuels }, { items: bonus }] =
+      await Promise.all([
+        readSheetAsObjects(TABS.PARTICIPANTS),
+        readSheetAsObjects(TABS.DEFIS_ACTUELS),
+        readSheetAsObjects(TABS.DEFIS_LINGUISTIQUES),
+      ]);
 
-        const pointsMatchs = pronosticsMatchs
-          .filter((pr) => {
-            // Ignore les lignes vides (sans ID_Joueur ni ID_Pronostic).
-            if (!pr.ID_Joueur && !pr.ID_Pronostic) return false;
-            return normId(pr.ID_Joueur) === idNorm;
-          })
-          .reduce((sum, pr) => sum + toNumber(pr.Points_Obtenus), 0);
-
-        const initial = pronosticsInitiaux.find(
-          (pi) => normId(pi.ID_Joueur) === idNorm
-        );
-        const pointsInitiaux = initial
-          ? toNumber(initial.Total_Initiaux)
-          : 0;
-
-        const pointsDefis = defis
-          .filter((d) => {
-            // Ignore les lignes totalement vides (sans ID_Joueur ni ID_Bonus
-            // ni Points) qui peuvent apparaitre si l'onglet contient des
-            // lignes blanches en dessous des donnees.
-            const hasContent =
-              (d.ID_Joueur && String(d.ID_Joueur).trim() !== '') ||
-              (d.ID_Bonus && String(d.ID_Bonus).trim() !== '') ||
-              (d.Points && String(d.Points).trim() !== '');
-            if (!hasContent) return false;
-            return normId(d.ID_Joueur) === idNorm;
-          })
-          .reduce((sum, d) => sum + toNumber(d.Points), 0);
-
-        const total = pointsMatchs + pointsInitiaux + pointsDefis;
-
-        return {
-          idJoueur,
-          prenom: p.Prenom_Pseudo,
-          pointsMatchs,
-          pointsInitiaux,
-          pointsDefis,
-          total,
-        };
-      });
-
-    // Tri decroissant par total, puis par pointsMatchs en cas d'egalite
-    ranking.sort((a, b) => {
-      if (b.total !== a.total) return b.total - a.total;
-      return b.pointsMatchs - a.pointsMatchs;
+    return NextResponse.json({
+      participants: participants
+        .filter((p) => (p.Statut || '').trim().toLowerCase() === 'actif')
+        .map((p) => ({ idJoueur: p.ID_Joueur, prenom: p.Prenom_Pseudo })),
+      defis: defisActuels.map((d) => ({
+        idDefi: d.ID_Defi,
+        nom: d.Nom_Defi,
+        langue: d.Langue,
+        pointsMax: Number(d.Points_Max || MAX_POINTS_PAR_DEFI),
+      })),
+      bonusExistants: bonus
+        .filter((b) => b.ID_Joueur && String(b.ID_Joueur).trim() !== '')
+        .map((b) => ({
+          idJoueur: b.ID_Joueur,
+          nomDefi: b.Nom_Defi,
+          points: Number(b.Points || 0),
+          commentaire: b.Commentaire || '',
+          dateAttribution: b.Date_Attribution || '',
+        })),
     });
-
-    // Attribution du rang (les ex-aequo partagent le meme rang)
-    let currentRank = 0;
-    let previousTotal = null;
-    ranking.forEach((r, idx) => {
-      if (r.total !== previousTotal) {
-        currentRank = idx + 1;
-        previousTotal = r.total;
-      }
-      r.rang = currentRank;
-    });
-
-    return NextResponse.json({ ranking });
   } catch (err) {
-    console.error('Erreur /api/leaderboard', err);
+    console.error('Erreur GET /api/admin/bonus', err);
     return NextResponse.json(
-      { error: 'Impossible de charger le classement.' },
+      { error: 'Impossible de charger les donnees.' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request) {
+  try {
+    const password = request.headers.get('x-admin-password') || '';
+    const ok = await verifyAdminPassword(password);
+    if (!ok) {
+      return NextResponse.json({ error: 'Non autorise.' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { idJoueur, prenom, nomDefi, langue, points, commentaire } = body;
+
+    if (!idJoueur || !nomDefi || points === undefined || points === null) {
+      return NextResponse.json(
+        { error: 'Informations manquantes.' },
+        { status: 400 }
+      );
+    }
+
+    let pointsFinal = Number(points);
+    if (isNaN(pointsFinal) || pointsFinal < 0) pointsFinal = 0;
+    if (pointsFinal > MAX_POINTS_PAR_DEFI) pointsFinal = MAX_POINTS_PAR_DEFI;
+
+    const { items } = await readSheetAsObjects(TABS.DEFIS_LINGUISTIQUES);
+
+    const dateAttribution = new Date().toISOString();
+
+    // Toujours ajouter une nouvelle ligne, jamais mettre a jour ou
+    // remplacer une ligne existante. Cela permet d'attribuer plusieurs
+    // bonus au meme joueur pour le meme defi (ex. participations
+    // multiples) ; le classement additionnera toutes les lignes.
+    const idBonus = generateId('BO', items.length, 4);
+    const row = DEFIS_LINGUISTIQUES_COLS.map((col) => {
+      switch (col) {
+        case 'ID_Bonus':
+          return idBonus;
+        case 'ID_Joueur':
+          return idJoueur;
+        case 'Prenom_Pseudo':
+          return prenom || '';
+        case 'Nom_Defi':
+          return nomDefi;
+        case 'Langue':
+          return langue || '';
+        case 'Points':
+          return pointsFinal;
+        case 'Date_Attribution':
+          return dateAttribution;
+        case 'Commentaire':
+          return commentaire || '';
+        default:
+          return '';
+      }
+    });
+    await appendRow(TABS.DEFIS_LINGUISTIQUES, row);
+
+    return NextResponse.json({ success: true, pointsAttribues: pointsFinal });
+  } catch (err) {
+    console.error('Erreur POST /api/admin/bonus', err);
+    return NextResponse.json(
+      { error: 'Une erreur est survenue lors de l\'enregistrement.' },
       { status: 500 }
     );
   }
