@@ -12,18 +12,21 @@ import { readSheetAsObjects } from '../../../lib/sheets';
 import { TABS } from '../../../lib/schema';
 
 // Convertit une valeur de cellule (qui peut etre un nombre, une chaine,
-// une chaine avec espaces, une virgule decimale, ou vide/undefined) en
-// nombre. Retourne 0 si la valeur est vide, manquante, ou non numerique.
+// une chaine avec espaces, un signe "+" devant, une virgule decimale, ou
+// vide/undefined) en nombre. Retourne 0 si la valeur est vide, manquante,
+// ou non numerique.
 function toNumber(value) {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : 0;
   }
-  const str = String(value).trim();
+  let str = String(value).trim();
   if (str === '') return 0;
+  // Retire un eventuel "+" devant (ex: "+10").
+  if (str.startsWith('+')) str = str.slice(1).trim();
   // Remplace une eventuelle virgule decimale par un point.
-  const normalized = str.replace(',', '.');
-  const num = Number(normalized);
+  str = str.replace(',', '.');
+  const num = Number(str);
   return Number.isFinite(num) ? num : 0;
 }
 
@@ -74,7 +77,14 @@ export async function GET() {
 
         const pointsDefis = defis
           .filter((d) => {
-            if (!d.ID_Joueur && !d.ID_Bonus) return false;
+            // Ignore les lignes totalement vides (sans ID_Joueur ni ID_Bonus
+            // ni Points) qui peuvent apparaitre si l'onglet contient des
+            // lignes blanches en dessous des donnees.
+            const hasContent =
+              (d.ID_Joueur && String(d.ID_Joueur).trim() !== '') ||
+              (d.ID_Bonus && String(d.ID_Bonus).trim() !== '') ||
+              (d.Points && String(d.Points).trim() !== '');
+            if (!hasContent) return false;
             return normId(d.ID_Joueur) === idNorm;
           })
           .reduce((sum, d) => sum + toNumber(d.Points), 0);
